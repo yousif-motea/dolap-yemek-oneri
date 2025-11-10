@@ -79,3 +79,4 @@ Sistem şu anda:
 
 
 Gultensiz yemekler eklenecek 
+alerjen uyarısı eklenmesi gerekiyor
