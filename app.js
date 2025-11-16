@@ -1,4 +1,4 @@
-// app.js — gelişmiş istemci
+// app.js — gelişmiş istemci (İyileştirilmiş Sürüm)
 class SmartRecipeApp {
   constructor() {
     this.favorites = JSON.parse(localStorage.getItem("recipe_favorites")) || [];
@@ -13,7 +13,7 @@ class SmartRecipeApp {
   init() {
     this.initTheme();
     this.initEventListeners();
-    this.initDragAndDrop();
+    this.initDragAndDrop(); // <-- YENİ: Fonksiyon artık çalışıyor
     this.initAdvancedFilters();
     this.initNotifications();
     this.updateFavoriteButtons();
@@ -85,7 +85,25 @@ class SmartRecipeApp {
     const input = form.querySelector('input[name="ingredient"]');
     const ingredientName = input.value.trim();
     if (!ingredientName) return;
-    const formData = new FormData(form);
+
+    // YENİ: Ekleme mantığı merkezi bir fonksiyona taşındı
+    this.addPantryItem(ingredientName);
+    input.value = ""; // Formu temizle
+  }
+
+  /**
+   * YENİ: Dolaba malzeme eklemek için merkezi fonksiyon.
+   * Hem form gönderimi hem de Sürükle-Bırak bunu kullanır.
+   */
+  async addPantryItem(name) {
+    const form = document.getElementById("pantryForm"); // CSRF token'ı için formu bul
+    if (!form) return;
+
+    const formData = new FormData();
+    formData.append("action", "add_pantry");
+    formData.append("csrf", form.querySelector('input[name="csrf"]')?.value);
+    formData.append("ingredient", name);
+
     try {
       const response = await fetch("index.php", {
         method: "POST",
@@ -93,8 +111,7 @@ class SmartRecipeApp {
       });
       const data = await response.json();
       if (data.success) {
-        input.value = "";
-        this.showNotification(data.message || "Malzeme dolaba eklendi");
+        this.showNotification(data.message || `${name} dolaba eklendi`);
         this.updatePantryList(data.pantry);
         this.updateRecipes();
       } else {
@@ -107,7 +124,9 @@ class SmartRecipeApp {
 
   async handleDeletePantry(button) {
     const form = button.closest("form");
-    const ingredientName = form?.querySelector(".pantry-name")?.textContent;
+    const ingredientName = form
+      .closest(".pantry-item")
+      .querySelector(".pantry-name")?.textContent;
     if (
       !confirm(
         `"${ingredientName}" malzemesini silmek istediğinizden emin misiniz?`
@@ -135,7 +154,16 @@ class SmartRecipeApp {
 
   updatePantryList(pantryData) {
     const pantryList = document.querySelector(".pantry-list");
-    if (!pantryList) return;
+    const pantryCard = pantryList?.closest(".card");
+    if (!pantryList || !pantryCard) return;
+
+    // Dolap temizle butonunu yönet
+    const clearButton = pantryCard.querySelector('form[action="clear_pantry"]');
+    if (clearButton) {
+      clearButton.style.display =
+        !pantryData || pantryData.length === 0 ? "none" : "block";
+    }
+
     if (!pantryData || pantryData.length === 0) {
       pantryList.innerHTML = `
         <div class="empty-state">
@@ -355,7 +383,76 @@ class SmartRecipeApp {
 
   // Placeholder implementasyonları
   initMobileMenu() {}
-  initDragAndDrop() {}
+
+  /**
+   * YENİ: Sürükle-Bırak fonksiyonu dolduruldu.
+   */
+  initDragAndDrop() {
+    // "Dolabım" kartını (bırakma alanı) bul
+    const dropZone = Array.from(document.querySelectorAll(".sidebar .card h2"))
+      .find((h2) => h2.textContent.includes("Dolabım"))
+      ?.closest("section.card");
+
+    if (!dropZone) {
+      console.warn("Sürükle-bırak için 'Dolabım' kartı bulunamadı.");
+      return;
+    }
+
+    let dragCounter = 0;
+    const originalBorder = dropZone.style.border;
+    const originalTransform = dropZone.style.transform;
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+    });
+
+    dropZone.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      dropZone.style.border = "2px dashed var(--primary)";
+      dropZone.style.transform = "scale(1.02)";
+      dropZone.style.transition = "all 0.2s ease";
+    });
+
+    dropZone.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter === 0) {
+        // Efekti sıfırla
+        dropZone.style.border = originalBorder;
+        dropZone.style.transform = originalTransform;
+      }
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0; // Sayacı sıfırla
+      // Efekti sıfırla
+      dropZone.style.border = originalBorder;
+      dropZone.style.transform = originalTransform;
+
+      const ingredientName = e.dataTransfer.getData("text/plain");
+      if (ingredientName) {
+        this.addPantryItem(ingredientName); // Merkezi fonksiyonu çağır
+      }
+    });
+
+    // Sürüklenen malzemeleri ayarla
+    document.querySelectorAll(".ingredient-checkbox").forEach((item) => {
+      item.addEventListener("dragstart", (e) => {
+        // Malzeme adını checkbox'ın value'sundan al
+        const name = item.querySelector('input[type="checkbox"]').value;
+        e.dataTransfer.setData("text/plain", name);
+        e.dataTransfer.effectAllowed = "copy";
+      });
+    });
+  }
+
   initAdvancedFilters() {}
   applyAdvancedFilters() {}
 
@@ -412,13 +509,40 @@ class SmartRecipeApp {
     if (action.includes("Alışveriş")) return this.renderShoppingList();
     if (action.includes("Yemek Planla")) return this.renderMealPlanner();
     if (action.includes("Favorilerim")) return this.renderFavorites();
+
+    /**
+     * YENİ: Rastgele Tarif özelliği eklendi.
+     */
     if (action.includes("Rastgele")) {
-      // "Rastgele Tarif" için bir fonksiyon tanımlanmamış.
-      // Geçici olarak bir bildirim gösteriyoruz.
-      return this.showNotification(
-        "Rastgele tarif özelliği henüz eklenmedi.",
-        "info"
-      );
+      const cards = document.querySelectorAll("#recipesGrid .recipe-card");
+      if (cards.length === 0) {
+        return this.showNotification(
+          "Önce tarifleri yükleyin veya aratın.",
+          "info"
+        );
+      }
+
+      // Rastgele bir kart seç
+      const randomCard = cards[Math.floor(Math.random() * cards.length)];
+
+      // Karta git ve vurgula
+      randomCard.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      const originalShadow = randomCard.style.boxShadow;
+      const originalTransition = randomCard.style.transition;
+
+      randomCard.style.transition = "all 0.3s ease-in-out";
+      randomCard.style.boxShadow = `0 0 0 4px var(--primary), ${originalShadow}`;
+
+      setTimeout(() => {
+        randomCard.style.boxShadow = originalShadow;
+        // Geçişi sıfırla
+        setTimeout(() => {
+          randomCard.style.transition = originalTransition;
+        }, 300);
+      }, 2000); // 2 saniye vurgula
+
+      return;
     }
   }
   renderShoppingList() {

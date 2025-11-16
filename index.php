@@ -191,7 +191,7 @@ $all_ingredients = get_all_ingredients();
             <div class="header-top">
                 <div class="logo">
                     <i class="fas fa-utensils"></i>
-                    <h1>Akıllı Yemek Öneri</h1>
+                    <h1>PİŞİRİO - Akıllı Yemek Öneri</h1>
                 </div>
                 <div class="header-actions">
                     <button class="btn btn-secondary theme-toggle"><i class="fas fa-moon"></i> Tema</button>
