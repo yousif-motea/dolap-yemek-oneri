@@ -1,5 +1,5 @@
 <?php
-// index.php — Akıllı Yemek Öneri Sistemi (tam çalışır sürüm)
+// index.php – Akıllı Yemek Öneri Sistemi (Modern Versiyon)
 session_start();
 header_remove("X-Powered-By");
 
@@ -38,7 +38,6 @@ if ($method === 'GET' && $action === 'get_pantry') {
     json_response(['success' => true, 'pantry' => $pantry]);
 }
 
-
 // GET /?action=get_favorites
 if ($method === 'GET' && $action === 'get_favorites') {
     $fav_recipes = get_user_favorites($session_id);
@@ -69,28 +68,21 @@ if ($method === 'GET' && $action === 'get_favorites') {
     json_response(['success' => true, 'recipes' => $out]);
 }
 
-// GET /?action=search_recipes (selected ingredients via GET)
+// GET /?action=search_recipes
 if ($method === 'GET' && $action === 'search_recipes') {
     $selected = array_map('trim', $_GET['ingredients'] ?? []);
     $min_match = (int)($_GET['min_match'] ?? 1);
     $q = trim($_GET['q'] ?? '');
 
-    // Eşleşmeli liste (skorlu)
     $recipes = search_recipes_scored($selected, $min_match, $q);
-
-    // Kullanıcının dolabına göre var/eksik listeleri üret
     $pantry_names = list_pantry_names();
     $out = [];
+
     foreach ($recipes as $r) {
         $ings = get_recipe_ingredients($r['id']);
         $have = array_values(array_intersect($ings, $pantry_names));
         $missing = array_values(array_diff($ings, $pantry_names));
 
-        // match_percentage varsa kullan; yoksa basit hesap
-        // Yüzde hesaplama mantığı:
-        // 1) search_recipes_scored 'match_percentage' üretiyorsa onu kullan.
-        // 2) Üretmiyorsa seçili malzemeler varsa: (tarifteki toplam malzeme içinde seçilenlerin payı)
-        // 3) Seçili yoksa dolaptaki malzemeler baz alınır (eski davranış)
         if (isset($r['match_percentage'])) {
             $pct = (int)$r['match_percentage'];
         } else if (!empty($selected)) {
@@ -153,18 +145,14 @@ if ($method === 'POST') {
         json_response(['success' => true, 'action' => $act]);
     }
 
-    // Otomatik olmayan bir POST geldiyse
     json_response(['success' => false, 'message' => 'Bilinmeyen işlem'], 404);
 }
 
 // ---- Sayfa render (SSR) ----
-
-// Query params
 $q = trim($_GET['q'] ?? '');
 $min_match = (int)($_GET['min_match'] ?? 1);
 $selected_ingredients = $_GET['ingredients'] ?? [];
 
-// Veriler
 $stats = get_stats();
 $pantry = list_pantry();
 $pantry_names = list_pantry_names();
@@ -177,30 +165,37 @@ $all_ingredients = get_all_ingredients();
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Akıllı Yemek Öneri Sistemi</title>
+    <title>PİŞİRİO - Akıllı Yemek Öneri Sistemi</title>
+    <meta name="description" content="Dolabınızdaki malzemelerle yapabileceğiniz tarifleri keşfedin">
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
     <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
     <div class="container">
+        <!-- Header -->
         <header class="header">
             <div class="header-top">
                 <div class="logo">
                     <i class="fas fa-utensils"></i>
-                    <h1>PİŞİRİO - Akıllı Yemek Öneri</h1>
+                    <h1>PİŞİRİO</h1>
                 </div>
                 <div class="header-actions">
-                    <button class="btn btn-secondary theme-toggle"><i class="fas fa-moon"></i> Tema</button>
-                    <a class="btn btn-primary" href="?">Yenile</a>
+                    <button class="btn btn-secondary theme-toggle">
+                        <i class="fas fa-moon"></i> Tema
+                    </button>
+                    <a class="btn btn-primary" href="?">
+                        <i class="fas fa-rotate"></i> Yenile
+                    </a>
                 </div>
             </div>
-            <p class="tagline">Dolabındaki malzemelerle anında öneri</p>
+            <p class="tagline">Dolabındaki malzemelerle anında yemek tarifi önerisi al</p>
         </header>
 
+        <!-- Quick Actions -->
         <div class="quick-actions">
             <button class="action-card">
                 <i class="fas fa-shopping-cart"></i>
@@ -220,17 +215,21 @@ $all_ingredients = get_all_ingredients();
             </button>
         </div>
 
+        <!-- Main Layout -->
         <div class="main-layout">
-            <!-- Sol Sidebar -->
+            <!-- Sidebar -->
             <aside class="sidebar">
+                <!-- Malzeme Ekle -->
                 <section class="card">
                     <h2><i class="fas fa-plus-circle"></i> Malzeme Ekle</h2>
                     <form method="post" class="add-form" id="pantryForm">
                         <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>" />
                         <input type="hidden" name="action" value="add_pantry" />
                         <div class="input-group">
-                            <input type="text" name="ingredient" placeholder="örn. domates, soğan, zeytinyağı..." required autocomplete="off" />
-                            <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Ekle</button>
+                            <input type="text" name="ingredient" placeholder="örn. domates, soğan..." required autocomplete="off" />
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus"></i>
+                            </button>
                         </div>
                     </form>
                     <div class="help-text">
@@ -238,6 +237,7 @@ $all_ingredients = get_all_ingredients();
                     </div>
                 </section>
 
+                <!-- Malzeme Seçimi -->
                 <section class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-check-circle"></i> Malzeme Seçimi</h2>
@@ -245,7 +245,9 @@ $all_ingredients = get_all_ingredients();
                             <a href="?" class="btn btn-sm btn-secondary">Sıfırla</a>
                         </div>
                     </div>
-                    <p class="help-text">Tarif aramak için malzemeleri seçin veya tüm dolabı kullanın:</p>
+                    <p class="help-text">
+                        <i class="fas fa-info-circle"></i> Tarif aramak için malzemeleri seçin
+                    </p>
 
                     <form method="get" class="ingredient-selector" id="ingredientForm">
                         <input type="hidden" name="min_match" id="min_match" value="<?= (int)$min_match ?>" />
@@ -256,8 +258,13 @@ $all_ingredients = get_all_ingredients();
                                 $isSelected = in_array($ingredient['name'], (array)$selected_ingredients, true);
                                 $isInPantry = in_array($ingredient['name'], $pantry_names, true);
                             ?>
-                                <label class="ingredient-checkbox <?= $isSelected ? 'selected' : '' ?> <?= $isInPantry ? 'in-pantry' : '' ?>" draggable="true" title="Sürükleyip dolaba bırakın">
-                                    <input type="checkbox" name="ingredients[]" value="<?= htmlspecialchars($ingredient['name']) ?>" <?= $isSelected ? 'checked' : '' ?> />
+                                <label class="ingredient-checkbox <?= $isSelected ? 'selected' : '' ?>"
+                                    draggable="true"
+                                    title="Sürükleyip dolaba bırakın">
+                                    <input type="checkbox"
+                                        name="ingredients[]"
+                                        value="<?= htmlspecialchars($ingredient['name']) ?>"
+                                        <?= $isSelected ? 'checked' : '' ?> />
                                     <span class="checkmark"></span>
                                     <?= htmlspecialchars($ingredient['name']) ?>
                                     <span class="ingredient-count"><?= (int)$ingredient['count'] ?></span>
@@ -267,6 +274,7 @@ $all_ingredients = get_all_ingredients();
                     </form>
                 </section>
 
+                <!-- Dolabım -->
                 <section class="card">
                     <div class="card-header">
                         <h2><i class="fas fa-clipboard-list"></i> Dolabım</h2>
@@ -275,7 +283,7 @@ $all_ingredients = get_all_ingredients();
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>" />
                                 <input type="hidden" name="action" value="clear_pantry" />
                                 <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Tüm malzemeleri silmek istediğinizden emin misiniz?')">
-                                    <i class="fas fa-trash"></i> Temizle
+                                    <i class="fas fa-trash"></i>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -290,7 +298,9 @@ $all_ingredients = get_all_ingredients();
                                         <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>" />
                                         <input type="hidden" name="action" value="delete_pantry" />
                                         <input type="hidden" name="delete_id" value="<?= (int)$p['id'] ?>" />
-                                        <button type="submit" class="btn-icon delete-pantry" title="Sil"><i class="fas fa-times"></i></button>
+                                        <button type="submit" class="btn-icon delete-pantry" title="Sil">
+                                            <i class="fas fa-times"></i>
+                                        </button>
                                     </form>
                                 </div>
                             <?php endforeach; ?>
@@ -299,7 +309,7 @@ $all_ingredients = get_all_ingredients();
                         <div class="empty-state">
                             <i class="fas fa-inbox"></i>
                             <p>Henüz malzeme eklemediniz.</p>
-                            <p class="help-text">Yukarıdan malzeme ekleyin veya listeden sürükleyin</p>
+                            <p class="help-text">Yukarıdan malzeme ekleyin</p>
                         </div>
                     <?php endif; ?>
                 </section>
@@ -320,10 +330,14 @@ $all_ingredients = get_all_ingredients();
                 </section>
             </aside>
 
-            <!-- İçerik -->
+            <!-- Ana İçerik -->
             <main>
+                <!-- Sonuçlar Header -->
                 <section class="card results-header">
-                    <h2><i class="fas fa-bowl-food"></i> Önerilen Tarifler <span class="results-count">(…)</span></h2>
+                    <h2>
+                        <i class="fas fa-bowl-food"></i> Önerilen Tarifler
+                        <span class="results-count">(…)</span>
+                    </h2>
                     <?php if (!empty($selected_ingredients)): ?>
                         <div class="selected-indicator">
                             <strong>Seçili Malzemeler:</strong>
@@ -337,24 +351,33 @@ $all_ingredients = get_all_ingredients();
                     <?php endif; ?>
                 </section>
 
+                <!-- Filtreler -->
                 <section class="card">
                     <div class="filters">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
-                            <input id="searchInput" type="text" placeholder="Tarif, malzeme veya etiket ara…" value="<?= htmlspecialchars($q) ?>" />
+                            <input id="searchInput"
+                                type="text"
+                                placeholder="Tarif, malzeme veya etiket ara…"
+                                value="<?= htmlspecialchars($q) ?>" />
                         </div>
                         <form id="searchForm" class="filter-form">
                             <div class="filter-group-inline">
-                                <label class="filter-label-inline"><i class="fas fa-equals"></i> Min eşleşen malzeme</label>
+                                <label class="filter-label-inline">
+                                    <i class="fas fa-equals"></i> Min eşleşen
+                                </label>
                                 <select id="min_match" name="min_match">
                                     <option value="1" <?= $min_match == 1 ? 'selected' : ''; ?>>1</option>
                                     <option value="2" <?= $min_match == 2 ? 'selected' : ''; ?>>2</option>
                                     <option value="3" <?= $min_match == 3 ? 'selected' : ''; ?>>3</option>
+                                    <option value="4" <?= $min_match == 4 ? 'selected' : ''; ?>>4</option>
+                                    <option value="5" <?= $min_match == 5 ? 'selected' : ''; ?>>5</option>
                                 </select>
                             </div>
                         </form>
                     </div>
 
+                    <!-- Tarifler Grid -->
                     <div class="recipes-grid" id="recipesGrid">
                         <div class="empty-state large">
                             <i class="fas fa-spinner fa-spin"></i>
@@ -366,17 +389,22 @@ $all_ingredients = get_all_ingredients();
             </main>
         </div>
 
+        <!-- Footer -->
         <footer class="footer">
-            <p>Akıllı Yemek Öneri Sistemi &copy; <?= date('Y') ?> |
+            <p>
+                PİŞİRİO - Akıllı Yemek Öneri Sistemi &copy; <?= date('Y') ?> |
                 <span id="stats"><?= (int)$stats['total_recipes'] ?> tarif, <?= (int)$stats['total_ingredients'] ?> malzeme</span>
             </p>
         </footer>
     </div>
 
+    <!-- Notification -->
     <div class="notification"></div>
 
+    <!-- Scripts -->
     <script src="app.js"></script>
     <script>
+        // Malzeme kaldırma fonksiyonu
         function removeIngredient(ingredient) {
             const form = document.getElementById('ingredientForm');
             const checkboxes = form.querySelectorAll('input[name="ingredients[]"]');
@@ -389,6 +417,7 @@ $all_ingredients = get_all_ingredients();
             app.updateRecipes();
         }
 
+        // Checkbox seçimi görsel güncelleme
         document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('.ingredient-checkbox input').forEach(checkbox => {
                 checkbox.addEventListener('change', function() {

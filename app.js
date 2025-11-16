@@ -1,4 +1,4 @@
-// app.js — gelişmiş istemci (İyileştirilmiş Sürüm)
+// app.js – Akıllı Yemek Öneri Sistemi (Sayfalama ile)
 class SmartRecipeApp {
   constructor() {
     this.favorites = JSON.parse(localStorage.getItem("recipe_favorites")) || [];
@@ -7,14 +7,16 @@ class SmartRecipeApp {
     this.mealPlan = JSON.parse(localStorage.getItem("recipe_meal_plan")) || {};
     this.theme = localStorage.getItem("recipe_theme") || "light";
     this.currentView = "recipes";
+    this.allRecipes = []; // Tüm tarifler
+    this.displayedCount = 4; // İlk gösterilecek tarif sayısı
+    this.recipesPerPage = 4; // Her yüklemede eklenecek tarif sayısı
     this.init();
   }
 
   init() {
     this.initTheme();
     this.initEventListeners();
-    this.initDragAndDrop(); // <-- YENİ: Fonksiyon artık çalışıyor
-    this.initAdvancedFilters();
+    this.initDragAndDrop();
     this.initNotifications();
     this.updateFavoriteButtons();
     this.loadInitialData();
@@ -30,6 +32,7 @@ class SmartRecipeApp {
         this.theme === "dark" ? "fas fa-sun" : "fas fa-moon";
     themeToggle?.addEventListener("click", () => this.toggleTheme());
   }
+
   toggleTheme() {
     this.theme = this.theme === "light" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", this.theme);
@@ -76,6 +79,13 @@ class SmartRecipeApp {
     document.addEventListener("change", (e) => {
       if (e.target.name === "ingredients[]") this.updateRecipes();
     });
+
+    // Load More butonu
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("#loadMoreBtn")) {
+        this.loadMoreRecipes();
+      }
+    });
   }
 
   // Pantry
@@ -86,17 +96,12 @@ class SmartRecipeApp {
     const ingredientName = input.value.trim();
     if (!ingredientName) return;
 
-    // YENİ: Ekleme mantığı merkezi bir fonksiyona taşındı
     this.addPantryItem(ingredientName);
-    input.value = ""; // Formu temizle
+    input.value = "";
   }
 
-  /**
-   * YENİ: Dolaba malzeme eklemek için merkezi fonksiyon.
-   * Hem form gönderimi hem de Sürükle-Bırak bunu kullanır.
-   */
   async addPantryItem(name) {
-    const form = document.getElementById("pantryForm"); // CSRF token'ı için formu bul
+    const form = document.getElementById("pantryForm");
     if (!form) return;
 
     const formData = new FormData();
@@ -157,7 +162,6 @@ class SmartRecipeApp {
     const pantryCard = pantryList?.closest(".card");
     if (!pantryList || !pantryCard) return;
 
-    // Dolap temizle butonunu yönet
     const clearButton = pantryCard.querySelector('form[action="clear_pantry"]');
     if (clearButton) {
       clearButton.style.display =
@@ -247,7 +251,9 @@ class SmartRecipeApp {
       const response = await fetch(`index.php?${params}`);
       const data = await response.json();
       if (data.success) {
-        this.renderRecipes(data.recipes);
+        this.allRecipes = data.recipes;
+        this.displayedCount = this.recipesPerPage; // Reset
+        this.renderRecipes();
       } else {
         throw new Error(data.message || "Tarifler yüklenemedi");
       }
@@ -257,13 +263,14 @@ class SmartRecipeApp {
     }
   }
 
-  renderRecipes(recipes) {
+  renderRecipes() {
     const recipesGrid = document.getElementById("recipesGrid");
     const resultsCount = document.querySelector(".results-count");
     if (!recipesGrid || !resultsCount) return;
-    resultsCount.textContent = `(${recipes.length} bulundu)`;
 
-    if (recipes.length === 0) {
+    resultsCount.textContent = `(${this.allRecipes.length} bulundu)`;
+
+    if (this.allRecipes.length === 0) {
       recipesGrid.innerHTML = `
         <div class="empty-state large">
           <i class="fas fa-search"></i>
@@ -274,9 +281,20 @@ class SmartRecipeApp {
       return;
     }
 
-    recipesGrid.innerHTML = recipes
-      .map(
-        (recipe) => `
+    // İlk N tarifi göster
+    const recipesToShow = this.allRecipes.slice(0, this.displayedCount);
+
+    recipesGrid.innerHTML = recipesToShow
+      .map((recipe) => this.createRecipeCard(recipe))
+      .join("");
+
+    // Load More butonu ekle
+    this.addLoadMoreButton(recipesGrid);
+    this.updateFavoriteButtons();
+  }
+
+  createRecipeCard(recipe) {
+    return `
       <div class="recipe-card ${recipe.is_complete ? "complete" : ""}" 
            data-recipe-id="${recipe.id}"
            data-prep-time="${recipe.prep_minutes || ""}"
@@ -296,12 +314,12 @@ class SmartRecipeApp {
               <div class="score-circle" style="--percentage: ${
                 recipe.match_percentage
               }%; --color: ${
-          recipe.match_percentage >= 80
-            ? "#10b981"
-            : recipe.match_percentage >= 50
-            ? "#f59e0b"
-            : "#ef4444"
-        }">
+      recipe.match_percentage >= 80
+        ? "#10b981"
+        : recipe.match_percentage >= 50
+        ? "#f59e0b"
+        : "#ef4444"
+    }">
                 <span>${recipe.match_percentage}%</span>
               </div>
               <small>Eşleşme</small>
@@ -317,7 +335,9 @@ class SmartRecipeApp {
           recipe.image_url
             ? `<div class="recipe-image"><img src="${this.escapeHTML(
                 recipe.image_url
-              )}" alt="${this.escapeHTML(recipe.title)}" /></div>`
+              )}" alt="${this.escapeHTML(
+                recipe.title
+              )}" loading="lazy" /></div>`
             : ""
         }
         <div class="recipe-info">
@@ -374,21 +394,63 @@ class SmartRecipeApp {
               : ""
           }
         </div>
-      </div>`
-      )
-      .join("");
-
-    this.updateFavoriteButtons();
+      </div>`;
   }
 
-  // Placeholder implementasyonları
-  initMobileMenu() {}
+  addLoadMoreButton(container) {
+    // Mevcut load more container'ı kaldır
+    const existingLoadMore = document.querySelector(".load-more-container");
+    if (existingLoadMore) {
+      existingLoadMore.remove();
+    }
 
-  /**
-   * YENİ: Sürükle-Bırak fonksiyonu dolduruldu.
-   */
+    // Daha fazla tarif var mı kontrol et
+    if (this.displayedCount < this.allRecipes.length) {
+      const remaining = this.allRecipes.length - this.displayedCount;
+      const loadMoreHtml = `
+        <div class="load-more-container">
+          <button class="load-more-btn" id="loadMoreBtn">
+            <i class="fas fa-plus-circle"></i> Daha Fazla Göster (${remaining} tarif)
+          </button>
+          <p class="showing-info">
+            ${this.displayedCount} / ${this.allRecipes.length} tarif görüntüleniyor
+          </p>
+        </div>
+      `;
+      container.insertAdjacentHTML("afterend", loadMoreHtml);
+    } else if (this.allRecipes.length > this.recipesPerPage) {
+      // Tüm tarifler gösterildi mesajı
+      const allShownHtml = `
+        <div class="load-more-container">
+          <p class="showing-info">
+            <i class="fas fa-check-circle"></i> Tüm tarifler görüntüleniyor (${this.allRecipes.length})
+          </p>
+        </div>
+      `;
+      container.insertAdjacentHTML("afterend", allShownHtml);
+    }
+  }
+
+  loadMoreRecipes() {
+    this.displayedCount += this.recipesPerPage;
+    this.renderRecipes();
+
+    // Yeni eklenen ilk tarife scroll yap
+    const cards = document.querySelectorAll(".recipe-card");
+    if (cards.length > this.recipesPerPage) {
+      const targetIndex = Math.max(
+        0,
+        this.displayedCount - this.recipesPerPage - 1
+      );
+      cards[targetIndex]?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }
+
+  // Sürükle-Bırak
   initDragAndDrop() {
-    // "Dolabım" kartını (bırakma alanı) bul
     const dropZone = Array.from(document.querySelectorAll(".sidebar .card h2"))
       .find((h2) => h2.textContent.includes("Dolabım"))
       ?.closest("section.card");
@@ -422,7 +484,6 @@ class SmartRecipeApp {
       e.stopPropagation();
       dragCounter--;
       if (dragCounter === 0) {
-        // Efekti sıfırla
         dropZone.style.border = originalBorder;
         dropZone.style.transform = originalTransform;
       }
@@ -431,30 +492,24 @@ class SmartRecipeApp {
     dropZone.addEventListener("drop", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      dragCounter = 0; // Sayacı sıfırla
-      // Efekti sıfırla
+      dragCounter = 0;
       dropZone.style.border = originalBorder;
       dropZone.style.transform = originalTransform;
 
       const ingredientName = e.dataTransfer.getData("text/plain");
       if (ingredientName) {
-        this.addPantryItem(ingredientName); // Merkezi fonksiyonu çağır
+        this.addPantryItem(ingredientName);
       }
     });
 
-    // Sürüklenen malzemeleri ayarla
     document.querySelectorAll(".ingredient-checkbox").forEach((item) => {
       item.addEventListener("dragstart", (e) => {
-        // Malzeme adını checkbox'ın value'sundan al
         const name = item.querySelector('input[type="checkbox"]').value;
         e.dataTransfer.setData("text/plain", name);
         e.dataTransfer.effectAllowed = "copy";
       });
     });
   }
-
-  initAdvancedFilters() {}
-  applyAdvancedFilters() {}
 
   // Notification
   initNotifications() {
@@ -464,6 +519,7 @@ class SmartRecipeApp {
       document.body.appendChild(div);
     }
   }
+
   showNotification(msg, type = "success") {
     const box = document.querySelector(".notification");
     if (!box) return;
@@ -484,12 +540,14 @@ class SmartRecipeApp {
       timeout = setTimeout(() => func.apply(this, args), wait);
     };
   }
+
   escapeHTML(str) {
     if (!str) return "";
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
   }
+
   updateFavoriteButtons() {
     document.querySelectorAll(".favorite-btn").forEach((btn) => {
       const recipeCard = btn.closest(".recipe-card");
@@ -502,84 +560,104 @@ class SmartRecipeApp {
     });
   }
 
-  // Views (minimal)
+  // Quick Actions
   handleQuickAction(card) {
     const action = card.querySelector("span")?.textContent?.trim();
     if (!action) return;
+
     if (action.includes("Alışveriş")) return this.renderShoppingList();
     if (action.includes("Yemek Planla")) return this.renderMealPlanner();
     if (action.includes("Favorilerim")) return this.renderFavorites();
 
-    /**
-     * YENİ: Rastgele Tarif özelliği eklendi.
-     */
     if (action.includes("Rastgele")) {
-      const cards = document.querySelectorAll("#recipesGrid .recipe-card");
-      if (cards.length === 0) {
+      if (this.allRecipes.length === 0) {
         return this.showNotification(
           "Önce tarifleri yükleyin veya aratın.",
           "info"
         );
       }
 
-      // Rastgele bir kart seç
-      const randomCard = cards[Math.floor(Math.random() * cards.length)];
+      const randomRecipe =
+        this.allRecipes[Math.floor(Math.random() * this.allRecipes.length)];
+      const cards = document.querySelectorAll("#recipesGrid .recipe-card");
+      const targetCard = Array.from(cards).find(
+        (card) => card.dataset.recipeId === String(randomRecipe.id)
+      );
 
-      // Karta git ve vurgula
-      randomCard.scrollIntoView({ behavior: "smooth", block: "center" });
-
-      const originalShadow = randomCard.style.boxShadow;
-      const originalTransition = randomCard.style.transition;
-
-      randomCard.style.transition = "all 0.3s ease-in-out";
-      randomCard.style.boxShadow = `0 0 0 4px var(--primary), ${originalShadow}`;
-
-      setTimeout(() => {
-        randomCard.style.boxShadow = originalShadow;
-        // Geçişi sıfırla
+      if (targetCard) {
+        targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        const originalShadow = targetCard.style.boxShadow;
+        targetCard.style.transition = "all 0.3s ease-in-out";
+        targetCard.style.boxShadow = `0 0 0 4px var(--primary), ${originalShadow}`;
         setTimeout(() => {
-          randomCard.style.transition = originalTransition;
+          targetCard.style.boxShadow = originalShadow;
+        }, 2000);
+      } else {
+        // Tarif görünmüyorsa, göster ve scroll yap
+        this.displayedCount = this.allRecipes.length;
+        this.renderRecipes();
+        setTimeout(() => {
+          const newCards = document.querySelectorAll(
+            "#recipesGrid .recipe-card"
+          );
+          const newTargetCard = Array.from(newCards).find(
+            (card) => card.dataset.recipeId === String(randomRecipe.id)
+          );
+          if (newTargetCard) {
+            newTargetCard.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+            const originalShadow = newTargetCard.style.boxShadow;
+            newTargetCard.style.transition = "all 0.3s ease-in-out";
+            newTargetCard.style.boxShadow = `0 0 0 4px var(--primary), ${originalShadow}`;
+            setTimeout(() => {
+              newTargetCard.style.boxShadow = originalShadow;
+            }, 2000);
+          }
         }, 300);
-      }, 2000); // 2 saniye vurgula
-
-      return;
+      }
     }
   }
+
   renderShoppingList() {
     const container = document.getElementById("recipesGrid");
     if (!container) return;
     const list = this.shoppingList || [];
     container.innerHTML = `
-      <div class="panel">
-        <div class="panel-header">
-          <h3><i class="fas fa-shopping-cart"></i> Alışveriş Listesi</h3>
-          <div class="panel-actions">
-            <button class="btn btn-secondary" id="add-item-btn"><i class="fas fa-plus"></i> Öğe Ekle</button>
-            <button class="btn btn-danger" id="clear-list-btn"><i class="fas fa-trash"></i> Temizle</button>
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="fas fa-shopping-cart"></i> Alışveriş Listesi</h2>
+          <div class="card-actions">
+            <button class="btn btn-sm btn-secondary" id="add-item-btn"><i class="fas fa-plus"></i> Ekle</button>
+            <button class="btn btn-sm btn-danger" id="clear-list-btn"><i class="fas fa-trash"></i> Temizle</button>
           </div>
         </div>
-        <ul class="shopping-list">
+        <div class="pantry-list">
           ${
             list.length
               ? list
                   .map(
                     (it, idx) => `
-            <li class="shopping-item">
-              <label><input type="checkbox" data-idx="${idx}" ${
+            <div class="pantry-item">
+              <label style="flex: 1; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" data-idx="${idx}" ${
                       it.done ? "checked" : ""
-                    }/> <span class="${
-                      it.done ? "done" : ""
-                    }">${this.escapeHTML(it.name)}</span></label>
+                    } style="width: 18px; height: 18px; cursor: pointer;"/>
+                <span style="${
+                  it.done ? "text-decoration: line-through; opacity: 0.6;" : ""
+                }">${this.escapeHTML(it.name)}</span>
+              </label>
               <button class="btn-icon" data-remove="${idx}" title="Sil"><i class="fas fa-times"></i></button>
-            </li>`
+            </div>`
                   )
                   .join("")
               : `<div class="empty-state"><i class="fas fa-inbox"></i><p>Liste boş.</p></div>`
           }
-        </ul>
+        </div>
       </div>`;
 
-    const add = () => {
+    document.getElementById("add-item-btn")?.addEventListener("click", () => {
       const name = prompt("Eklenecek malzeme:");
       if (!name) return;
       this.shoppingList.push({ name, done: false });
@@ -588,8 +666,9 @@ class SmartRecipeApp {
         JSON.stringify(this.shoppingList)
       );
       this.renderShoppingList();
-    };
-    const clear = () => {
+    });
+
+    document.getElementById("clear-list-btn")?.addEventListener("click", () => {
       if (!confirm("Listeyi temizlemek istiyor musunuz?")) return;
       this.shoppingList = [];
       localStorage.setItem(
@@ -597,9 +676,7 @@ class SmartRecipeApp {
         JSON.stringify(this.shoppingList)
       );
       this.renderShoppingList();
-    };
-    document.getElementById("add-item-btn")?.addEventListener("click", add);
-    document.getElementById("clear-list-btn")?.addEventListener("click", clear);
+    });
 
     container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.addEventListener("change", (e) => {
@@ -612,6 +689,7 @@ class SmartRecipeApp {
         this.renderShoppingList();
       });
     });
+
     container.querySelectorAll("button[data-remove]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const idx = Number(e.currentTarget.dataset.remove);
@@ -624,6 +702,7 @@ class SmartRecipeApp {
       });
     });
   }
+
   renderMealPlanner() {
     const container = document.getElementById("recipesGrid");
     if (!container) return;
@@ -637,25 +716,28 @@ class SmartRecipeApp {
       "Pazar",
     ];
     const plan = this.mealPlan || {};
+
     container.innerHTML = `
-      <div class="panel">
-        <div class="panel-header">
-          <h3><i class="fas fa-calendar-alt"></i> Haftalık Yemek Planı</h3>
-          <div class="panel-actions">
-            <button class="btn btn-secondary" id="export-plan"><i class="fas fa-file-export"></i> Dışa Aktar</button>
-            <button class="btn btn-danger" id="clear-plan"><i class="fas fa-trash"></i> Temizle</button>
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="fas fa-calendar-alt"></i> Haftalık Yemek Planı</h2>
+          <div class="card-actions">
+            <button class="btn btn-sm btn-secondary" id="export-plan"><i class="fas fa-file-export"></i> Dışa Aktar</button>
+            <button class="btn btn-sm btn-danger" id="clear-plan"><i class="fas fa-trash"></i> Temizle</button>
           </div>
         </div>
-        <div class="meal-grid">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
           ${days
             .map(
               (d) => `
-            <div class="meal-cell">
-              <div class="meal-day">${d}</div>
-              <div class="meal-title">${this.escapeHTML(plan[d] || "—")}</div>
-              <div class="meal-actions">
-                <button class="btn btn-sm btn-secondary" data-assign="${d}"><i class="fas fa-pen"></i> Ata</button>
-                <button class="btn btn-sm btn-primary" data-pick="${d}"><i class="fas fa-magic"></i> Gridden Seç</button>
+            <div style="padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border);">
+              <div style="font-weight: 700; margin-bottom: 8px; color: var(--primary);">${d}</div>
+              <div style="margin-bottom: 12px; min-height: 40px; color: var(--text-primary);">${this.escapeHTML(
+                plan[d] || "—"
+              )}</div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-secondary" data-assign="${d}" style="flex: 1;"><i class="fas fa-pen"></i></button>
+                <button class="btn btn-sm btn-primary" data-pick="${d}" style="flex: 1;"><i class="fas fa-magic"></i></button>
               </div>
             </div>`
             )
@@ -669,6 +751,7 @@ class SmartRecipeApp {
       localStorage.setItem("recipe_meal_plan", JSON.stringify(this.mealPlan));
       this.renderMealPlanner();
     });
+
     document.getElementById("export-plan")?.addEventListener("click", () => {
       const data = JSON.stringify(this.mealPlan, null, 2);
       const blob = new Blob([data], { type: "application/json" });
@@ -680,6 +763,7 @@ class SmartRecipeApp {
       URL.revokeObjectURL(url);
       this.showNotification("Plan dışa aktarıldı.");
     });
+
     container.querySelectorAll("button[data-assign]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const day = e.currentTarget.dataset.assign;
@@ -690,20 +774,23 @@ class SmartRecipeApp {
         this.renderMealPlanner();
       });
     });
+
     container.querySelectorAll("button[data-pick]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const day = e.currentTarget.dataset.pick;
-        const firstCard = document.querySelector(".recipe-card .recipe-title");
-        if (!firstCard) {
+        if (this.allRecipes.length === 0) {
           this.showNotification("Seçilecek tarif yok.", "error");
           return;
         }
-        this.mealPlan[day] = firstCard.textContent.trim();
+        const randomRecipe =
+          this.allRecipes[Math.floor(Math.random() * this.allRecipes.length)];
+        this.mealPlan[day] = randomRecipe.title;
         localStorage.setItem("recipe_meal_plan", JSON.stringify(this.mealPlan));
         this.renderMealPlanner();
       });
     });
   }
+
   async renderFavorites() {
     const container = document.getElementById("recipesGrid");
     const resultsCount = document.querySelector(".results-count");
@@ -712,12 +799,21 @@ class SmartRecipeApp {
       const res = await fetch("index.php?action=get_favorites");
       const data = await res.json();
       if (!data.success) throw new Error("Favoriler getirilemedi");
+
+      this.allRecipes = data.recipes;
+      this.displayedCount = this.recipesPerPage;
       resultsCount.textContent = `(${data.recipes.length} favori)`;
+
       if (data.recipes.length === 0) {
-        container.innerHTML = `<div class="empty-state large"><i class="fas fa-heart-broken"></i><h3>Favori yok</h3><p>Tarif kartındaki kalp butonuyla favorilere ekleyebilirsin.</p></div>`;
+        container.innerHTML = `
+          <div class="empty-state large">
+            <i class="fas fa-heart-broken"></i>
+            <h3>Favori yok</h3>
+            <p>Tarif kartındaki kalp butonuyla favorilere ekleyebilirsin.</p>
+          </div>`;
         return;
       }
-      this.renderRecipes(data.recipes);
+      this.renderRecipes();
     } catch (err) {
       this.showNotification(`Hata: ${err.message}`, "error");
     }
